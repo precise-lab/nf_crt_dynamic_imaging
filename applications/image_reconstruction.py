@@ -83,7 +83,7 @@ def create_measurements(vpt, nA, rnl):
         (numpy array, numpy array, numpy array, double): array of measurements, time average measurements, radii, and noise standard deviation
     """
 
-    image = np.load('initial_pressure.npy')
+    image = io.loadmat('initial_pressure')['p0'] 
     image = image.flatten()
     a = io.loadmat('spherical_radon')['A'].tocoo() 
     nR = int(a.shape[0]/nA)

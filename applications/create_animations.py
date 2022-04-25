@@ -66,7 +66,7 @@ if __name__ == "__main__":
         print("Cuda not available, Implementing with CPU")
         dev = torch.device('cpu')
 
-    image = np.load('initial_pressure.npy')
+    image = io.loadmat('initial_pressure')['p0']
     s = image.shape[0]
     nA = image.shape[2]
     
