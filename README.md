@@ -7,14 +7,14 @@ In this repository we display this proposed neural field framework with a superv
 
 Please cite our upcoming journal article “A Memory-Efficient Dynamic Image Reconstruction Method using Neural Fields”.
 
-#Dependencies 
+# Dependencies 
 
-'PyTorch': open source machine learning framework that accelerates the path from research prototyping to production deployment.
-'''bash
+`PyTorch`: open source machine learning framework that accelerates the path from research prototyping to production deployment.
+```bash
 conda install pytorch torchvision torchaudio -c pytorch
-'''
+```
 
-'scikit-image': collection of algorithms for image processing
-'''bash
+`scikit-image`: collection of algorithms for image processing
+```bash
 conda install scikit-image
-'''
+```
