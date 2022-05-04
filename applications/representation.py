@@ -16,7 +16,6 @@ import argparse
 sys.path.append( "../")
 
 import torch
-import random
 import numpy as np
 import scipy.io as io
 

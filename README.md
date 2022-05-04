@@ -6,3 +6,15 @@ Neural fields are a particular class of neural networks that represent the dynam
 In this repository we display this proposed neural field framework with a supervised learning example and two unsupervised image reconstruction examples using the dynamic circular radon transform (CRT).
 
 Please cite our upcoming journal article “A Memory-Efficient Dynamic Image Reconstruction Method using Neural Fields”.
+
+#Dependencies 
+
+'PyTorch': open source machine learning framework that accelerates the path from research prototyping to production deployment.
+'''bash
+conda install pytorch torchvision torchaudio -c pytorch
+'''
+
+'scikit-image': collection of algorithms for image processing
+'''bash
+conda install scikit-image
+'''

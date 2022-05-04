@@ -11,8 +11,6 @@
 # Software Foundation) version 3.0 dated June 2007.
 
 import torch
-import random
-import copy
 import numpy as np
 import scipy.io as io
 
