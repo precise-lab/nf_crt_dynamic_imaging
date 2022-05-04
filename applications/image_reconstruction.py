@@ -93,7 +93,7 @@ def create_measurements(vpt, nA, rnl):
         (numpy array, numpy array, numpy array, double): array of measurements, time average measurements, radii, and noise standard deviation
     """
 
-    image = io.loadmat('ups_induced_pressure')['induced_pressure'] 
+    image = io.loadmat('induced_pressure')['induced_pressure'] 
     nR = int(np.sqrt(2)*image.shape[0]/2) + 1
     radii = np.linspace(0, np.sqrt(2) , nR + 1)
     radii = radii[1:]
@@ -475,8 +475,7 @@ if __name__ == "__main__":
     print(sep, "Dynamic Component", sep)
     dynamic_targets = get_dynamic_targets(measurements, radii, args.ntB, args.nrB, args.nT, args.vpt)
     #List of regularization parameters
-    #deltas = [2, 1, 1/2, 1/4, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 0] 
-    deltas = [1/4]
+    deltas = [2, 1, 1/2, 1/4, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 0] 
     alpha = 1
     for delta in deltas:
         print("Regularization Paramater = ", delta)
