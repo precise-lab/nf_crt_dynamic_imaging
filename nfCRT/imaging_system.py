@@ -35,8 +35,7 @@ class Imaging_system():
     - 'get_quad_info': Calculates the quadrature values and points associated with a given, angle, and time
     - 'generate_imaging_tensors': Forms the tensor 'B' with quadrature values, and the tensor 'X' with quadrature coordinates
     """
-    def __init__(self, dev, tR, radii, nQ, views_times, side_length = 1, time_dependence = True, X = None, B = None):
-        self.dev = dev
+    def __init__(self, tR, radii, nQ, views_times, side_length = 1, time_dependence = True, X = None, B = None):
         self.tR = tR
         self.radii = radii
         self.nQ = nQ
@@ -108,8 +107,8 @@ class Imaging_system():
                 Bind0 += len(quad_vals)*[nR*i + j]
         Xnp = Xnp[0:R,:]
         Bind1 = [ k for k in range(len(Bind0))]
-        self.X = torch.from_numpy(Xnp).float().to(self.dev)
+        self.X = torch.from_numpy(Xnp).float()
         Bind =  []
         Bind.append(Bind0)
         Bind.append(Bind1)
-        self.B = torch.sparse_coo_tensor(Bind, Bvals, (nR*nV, len(Bind1) ), device = self.dev ).float()
+        self.B = torch.sparse_coo_tensor(Bind, Bvals, (nR*nV, len(Bind1) ) ).float()

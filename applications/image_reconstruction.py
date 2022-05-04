@@ -39,7 +39,6 @@ def data_fidelity(A, nf, X, measurements, std):
         tensor: data fidelity 
     """
     OUT = nf(X)
-
     exp_measurements = A@OUT
     sq = (exp_measurements - measurements)**2
     loss = torch.mean(sq)/(2*std**2) 
@@ -72,7 +71,7 @@ def nf_loss(A, nf, X, \
         gradx = torch.rand(10**5, nf.psi.geodim, device = X.get_device(), requires_grad = True) - 1/2
         grad_psi = nf.psi(gradx)
         if delta > 0:
-            out = nf(gradx)
+            out = torch.einsum( 'ij,jk,ki -> i', grad_psi, nf.C, nf.P(gradx))
             J = torch.autograd.grad(out, gradx, grad_outputs = torch.ones_like(out), create_graph = True)[0]
             loss += delta*torch.mean(torch.norm(J,dim = 1))
         if gamma > 0:
@@ -94,20 +93,22 @@ def create_measurements(vpt, nA, rnl):
         (numpy array, numpy array, numpy array, double): array of measurements, time average measurements, radii, and noise standard deviation
     """
 
-    image = io.loadmat('initial_pressure')['p0'] 
-    image = image.flatten()
-    a = io.loadmat('spherical_radon')['A'].tocoo() 
-    nR = int(a.shape[0]/nA)
+    image = io.loadmat('ups_induced_pressure')['induced_pressure'] 
+    nR = int(np.sqrt(2)*image.shape[0]/2) + 1
     radii = np.linspace(0, np.sqrt(2) , nR + 1)
     radii = radii[1:]
+    
+    a = DiscreteCircularRadonTransform(image.shape[0], numCircles= nR)
+    image = image.flatten()
+    
     time_int = np.linspace(-1/2, 1/2,nA)
     
 
-    #Calculates measurements and average measurements
+    #Calculates measurements and average measurementsf
     ave_meas = np.zeros(nR*nA)
     angles_per_time_vals = {}
     angles_per_time_inds = {}
-    print("         Calculatingviews and times for average")
+    print("         Calculating views and times for average")
     for i in range(nA):
         angles_per_time_vals[time_int[i]] = []
         angles_per_time_inds[i] = []
@@ -119,12 +120,13 @@ def create_measurements(vpt, nA, rnl):
     print("         Calculating Measurements")
     i = 0
     for time_index in angles_per_time_inds.keys():
-        holder = a@image[time_index::nA]/np.sqrt(2)
+        holder = a.fwd(image[time_index::nA])
         for view_index in angles_per_time_inds[time_index]:
             measurements[i*nR:(i+1)*nR] = holder[view_index*nR:(view_index+1)*nR]
             i += 1
     
     std = rnl*np.max(measurements)
+    
     print('Noise Standard Deviation = ', std)
     measurements += np.random.normal(0, std, nR*nA*vpt)
     i = 0
@@ -134,7 +136,7 @@ def create_measurements(vpt, nA, rnl):
             i += 1
     return measurements, ave_meas, radii, std
 
-def form_static_systems(ave_meas, rads, tR, nB, NQ, dev):
+def form_static_systems(ave_meas, rads, tR, nB, NQ):
     """Forms static systems for solving time averaged reconstruction problem
 
     Args:
@@ -157,11 +159,11 @@ def form_static_systems(ave_meas, rads, tR, nB, NQ, dev):
     static_targets = []
     for j in range(nB):
         measj = MEAS[:, j::nB].flatten()
-        static_targets.append(torch.from_numpy(measj).float().to(dev))
-        ave_systems.append(Imaging_system(dev, tR, radii[j::nB], NQ, ave_dict, time_dependence = False))
+        static_targets.append(torch.from_numpy(measj).float())
+        ave_systems.append(Imaging_system(tR, radii[j::nB], NQ, ave_dict, time_dependence = False))
     return ave_systems, static_targets
 
-def form_dynamic_systems(nA, rads, tR, vpt, ntB, nrB, NQ, dev):
+def form_dynamic_systems(nA, rads, tR, vpt, ntB, nrB, NQ):
     """Forms dynamic systems for solving dynamic reconstruction problem
 
     Args:
@@ -193,7 +195,7 @@ def form_dynamic_systems(nA, rads, tR, vpt, ntB, nrB, NQ, dev):
                     angles_per_time_vals[time_int[i]].append(2*np.pi*( i/nA + k/vpt) + np.pi/2 )
                 i += ntB
             print("     Forming Tensors, this may take a bit")
-            dynamic_systems.append(Imaging_system(dev, tR, rads[l::nrB], NQ, angles_per_time_vals))
+            dynamic_systems.append(Imaging_system(tR, rads[l::nrB], NQ, angles_per_time_vals))
     return dynamic_systems
 
 def get_dynamic_targets(measurements, rads, TB, RB, NA, vpt):
@@ -237,7 +239,7 @@ def get_dynamic_targets(measurements, rads, TB, RB, NA, vpt):
 
 def train_network(nf, systems, targets,\
             delta, std, \
-            nI, inner_thresholdC, inner_threshold_pou, condition_weights = False):
+            nI, inner_thresholdC, inner_threshold_pou, dev, condition_weights = False):
     """Trains neural field
 
     Args:
@@ -296,8 +298,8 @@ def train_network(nf, systems, targets,\
             for system, target in zip(systems, targets):
                 torch.cuda.empty_cache()
                 optimizer0.zero_grad()
-                loss = nf_loss(system.B, nf, system.X,  \
-                            target, std, \
+                loss = nf_loss(system.B.to(dev), nf, system.X.to(dev),  \
+                            target.to(dev), std, \
                             delta, gamma, rho)
                 acum_loss += loss.detach()
                 loss.backward()
@@ -321,8 +323,8 @@ def train_network(nf, systems, targets,\
             for system, target in zip(systems, targets):
                 torch.cuda.empty_cache()
                 optimizer1.zero_grad()
-                loss = nf_loss(system.B, nf, system.X,  \
-                            target, std, \
+                loss = nf_loss(system.B.to(dev), nf, system.X.to(dev),  \
+                            target.to(dev), std, \
                             delta, gamma, rho)
                 acum_loss += loss.detach()
                 loss.backward()
@@ -393,7 +395,7 @@ if __name__ == "__main__":
                         default = 180,
                         type = int)
     parser.add_argument('--nQuad_points', #Number of quadrature points per unit arc for CRT
-                        default = 500,
+                        default = 300,
                         type = int)
     parser.add_argument('--naB', #Number of batches for time averaged reconstruction problem
                         default = 2,
@@ -426,8 +428,8 @@ if __name__ == "__main__":
     print("Number of circles = ", nR)
     tR = np.sqrt(2)/2
 
-    ave_systems, static_targets = form_static_systems(ave_meas, radii, tR, args.naB,  args.nQuad_points, dev)
-    dynamic_systems = form_dynamic_systems(args.nT, radii, tR, args.vpt, args.ntB, args.nrB, args.nQuad_points, dev)
+    ave_systems, static_targets = form_static_systems(ave_meas, radii, tR, args.naB,  args.nQuad_points)
+    dynamic_systems = form_dynamic_systems(args.nT, radii, tR, args.vpt, args.ntB, args.nrB, args.nQuad_points)
     dynamic_nB = args.ntB*args.nrB
 
     #Geometric Dimension
@@ -460,21 +462,21 @@ if __name__ == "__main__":
     print(sep, "Static Component", sep)
     
     train_network(static_neural_field, ave_systems, static_targets,\
-                    0., std, args.nI, inner_thresholdC, inner_threshold_pou, condition_weights = True)
+                    0., std, args.nI, inner_thresholdC, inner_threshold_pou, dev, condition_weights = True)
 
     torch.save({'pou': static_neural_field.psi,
                 'C': static_neural_field.C,
     }, args.out_folder + 'static_net.pt')
 
     #Forms Imaging systems and targets for each batch
-    print(sep, "Initializing Dynamic Network", sep)
     spatial_to_dynamic(dynamic_neural_field, static_neural_field)
     
     
     print(sep, "Dynamic Component", sep)
     dynamic_targets = get_dynamic_targets(measurements, radii, args.ntB, args.nrB, args.nT, args.vpt)
     #List of regularization parameters
-    deltas = [2, 1, 1/2, 1/4, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 0] 
+    #deltas = [2, 1, 1/2, 1/4, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 0] 
+    deltas = [1/4]
     alpha = 1
     for delta in deltas:
         print("Regularization Paramater = ", delta)
@@ -482,11 +484,11 @@ if __name__ == "__main__":
         inner_threshold_net = 1e-1
         
         train_network(dynamic_neural_field, dynamic_systems, dynamic_targets,\
-                        delta, std, args.nI, inner_thresholdC, inner_threshold_pou)
+                        delta, std, args.nI, inner_thresholdC, inner_threshold_pou, dev)
         alpha = 0
         for dynamic_sys, dynamic_target in zip(dynamic_systems, dynamic_targets):
             torch.cuda.empty_cache()
-            alpha += data_fidelity(dynamic_sys.B, dynamic_neural_field, dynamic_sys.X, dynamic_target, std).detach()/dynamic_nB
+            alpha += data_fidelity(dynamic_sys.B.to(dev), dynamic_neural_field, dynamic_sys.X.to(dev), dynamic_target.to(dev), std).detach()/dynamic_nB
         print("alpha = ", alpha)
         
         #Saves Network 

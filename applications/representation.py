@@ -99,7 +99,8 @@ if __name__ == "__main__":
     except:
         pass
     
-    image = io.loadmat('initial_pressure')['p0']
+    image = io.loadmat('ups_induced_pressure')['induced_pressure']
+    image = (image[::2,::2,:] + image[1::2,::2,:] + image[1::2,::2,:] + image[1::2,1::2,:])/4
     s = image.shape[0]
     nA = image.shape[2]
 
