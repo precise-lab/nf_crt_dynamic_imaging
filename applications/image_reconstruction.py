@@ -102,7 +102,7 @@ def create_measurements(vpt, nA, rnl):
     time_int = np.linspace(-1/2, 1/2,nA)
     
 
-    #Calculates measurements and average measurementsf
+    #Calculates measurements and average measurements
     ave_meas = np.zeros(nR*nA)
     angles_per_time_vals = {}
     angles_per_time_inds = {}
@@ -182,7 +182,6 @@ def form_dynamic_systems(nA, rads, tR, vpt, ntB, nrB, NQ):
     
     for j in range(ntB):
         for l in range(nrB):
-            #Gets randomly chosen points for Gradient evaluation and regularization
             print("     Forming dynamic system", j*nrB+l)
             angles_per_time_vals = {}
             i = j

@@ -10,6 +10,8 @@
 # terms of the GNU General Public License (as published by the Free
 # Software Foundation) version 3.0 dated June 2007.
 
+#Downloads data set from https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/3DXS18
+python download_dataset.py
 #Runs representatoin or embedding expirement
 python representaiton.py
 python create_animations.py --out_folder Representation_Results/

@@ -60,20 +60,8 @@ class Imaging_system():
         offset = ring*np.transpose(np.array([np.cos(phi), np.sin(phi), np.zeros(phi.shape)]))
         quad_points = np.array([ self.tR*np.cos(view), self.tR*np.sin(view), time]) + offset
         
-        lb = -1
-        ub = -1
-        for q in range(nQr):
-            if np.max(np.abs(quad_points[q,0:2])) <= 1/2:
-                lb = q
-                ub = lb +1
-                break
-                
-        if lb >= 0:
-            for q in range(nQr - lb - 1):
-                if np.max(np.abs(quad_points[nQr  -1 - q,0:2])) <= 1/2:
-                    ub = nQr - q
-                    break
-        quad_points = quad_points[lb:ub,::]
+        inds = (np.abs(quad_points[:,0]) <= 1/2)*(np.abs(quad_points[:,1]) <= 1/2)
+        quad_points = quad_points[inds,:]
         if not self.time_dependence:
             quad_points = quad_points[:,0:-1]
         quad_vals = quad_points.shape[0]*[np.pi*ring/nQr]
