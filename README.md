@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/484778102.svg)](https://zenodo.org/badge/latestdoi/484778102)
+
 # Neural Field CRT Dynamic Imaging
 
 Companion code of journal article
