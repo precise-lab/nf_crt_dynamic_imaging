@@ -1,3 +1,14 @@
+# Copyright (c) 2022, Washington University in St. Louis.
+#
+# All Rights reserved.
+# See file COPYRIGHT for details.
+#
+# This file is part of the Neural Field CRT Dynamic Imaging Library. For more information and source code
+# availability see https://github.com/precise-wustl/nf_crt_dynamic_imaging.
+#
+# Neural Field CRT Dynamic Imaging is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License (as published by the Free
+# Software Foundation) version 3.0 dated June 2007.
 import sys
 import os
 import argparse
@@ -11,7 +22,18 @@ import scipy.sparse as sp
 import argparse
 
 from nfCRT import *
+
+
 def cg_basis(N,x):
+    """Forms continuous Galerkin basis for initializing partitions
+    
+    Args:
+        N (int): number of interpolation funcitons
+        x (pytorch tensor): points to evaluate CG basis
+
+    Returns:
+        tensor: value of CG basis evaluated at selected points
+    """
     dev = x.get_device()
     out = torch.zeros(x.size(0),N).to(dev)
 
@@ -21,7 +43,14 @@ def cg_basis(N,x):
         xj = 18*j/(N-1)-9
         out[:,j] = rl( 1- (N-1)*torch.abs(x-xj)/18)
     return out
+    
 def initialize_paritions(dpou, dev):
+    """Solves optimization problem to initialize partition of unity(POU) to CG basis
+
+    Args:
+        dpou (partition of unity): partition of unity  to be initialized
+        dev (pytorch device): device name for evaluation
+    """
     print("Initializing Partitions")
 
     opt = torch.optim.Adam(dpou.parameters(), lr = 1e-4)
@@ -137,7 +166,7 @@ if __name__ == "__main__":
         for i in range(ni):
             acum_loss = 0
             for b in range(nb):
-                optimizer1.zero_grad()
+                optimizer.zero_grad()
                 inds = np.arange(b,N*nA, nb)
 
                 space_inds = inds%(s**2)
@@ -189,7 +218,8 @@ if __name__ == "__main__":
                 inds = np.arange(b,N*nA, nb)
                 space_inds = inds%(s**2)
                 y = x[inds,:].to(dev)
-                out = nf(y[:,-1:], space_inds)
+                out_image[inds] = nf(y[:,-1:], space_inds).cpu().detach().numpy()
+
         err = np.linalg.norm(out_image - image)/np.linalg.norm(image)
         print("     RRMSE = ", err)
         torch.save({'pou': dynamic_pou,
