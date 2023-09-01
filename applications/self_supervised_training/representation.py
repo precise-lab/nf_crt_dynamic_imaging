@@ -13,7 +13,7 @@
 import sys
 import os
 import argparse
-sys.path.append( "../")
+sys.path.append( "../../")
 
 import torch
 import numpy as np
@@ -79,7 +79,7 @@ def spatial_to_dynamic( dnf, snf):
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description='Invert for Static average.')
+    parser = argparse.ArgumentParser(description='Supervised training to solve representaion problem')
     parser.add_argument('--out_folder',
                         default= 'Representation_Results/',
                         type = str)

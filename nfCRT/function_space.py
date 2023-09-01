@@ -9,7 +9,6 @@
 # Neural Field CRT Dynamic Imaging is free software; you can redistribute it and/or modify it under the
 # terms of the GNU General Public License (as published by the Free
 # Software Foundation) version 3.0 dated June 2007.
-
 import numpy as np
 import math
 import torch
@@ -18,32 +17,33 @@ Functions and Classes defining different types of spanning polynomial
 """
 
 
-def poly(x, m):
+def poly(x, m,sf):
     """
     Function that returns polynomial basis of degree 'm', evaluated at points 'x'
     """
     geodim = x.size()[1]
+    dev = x.get_device()
     
     if geodim == 0:
         return None
     if geodim == 1:
-        P = torch.zeros(m+1, x.size()[0]).to(x.get_device())
+        P = torch.zeros(m+1, x.size()[0], device = x.get_device())
         for i in range(m+1):
-            P[i,:] = torch.flatten(x**i)
+            P[i,:] = (sf**i)*torch.flatten(x**i)
         return P
     else:
         N = int(math.factorial(m + geodim)/(math.factorial(geodim)*math.factorial(m)))
-        P = torch.zeros(N,x.size()[0]).to(x.get_device())
+        P = torch.zeros(N,x.size()[0], device = x.get_device())
 
         R = 0
         for i in range(m+1):
-            P1 = poly(x[:,1:], m-i)
+            P1 = poly(x[:,1:], m-i, sf)
             r = P1.size()[0]
-            P[R:R+r, :] = torch.flatten(x[:,0]**i)*P1
+            P[R:R+r, :] = (sf**i)*torch.flatten(x[:,0]**i)*P1
             R += r
         return P
 
-def st_poly(x,m, mt):
+def st_poly(x,m, mt,sf):
     """
     Function that returns polynomial basis for separable degrees in space and time, evaluated at points 'x'
         - 'm' is the degree of the polynomial in space
@@ -53,21 +53,20 @@ def st_poly(x,m, mt):
     if geodim == 0:
         return None
     if geodim == 1:
-        P = torch.zeros(mt+1, x.size()[0]).to(x.get_device())
+        P = torch.zeros(mt+1, x.size()[0], device = x.get_device())
         for i in range(mt+1):
-            P[i,:] = torch.flatten(x**i)
+            P[i,:] = (sf**i)*torch.flatten(x**i)
         return P
     else:
         Nx = int(math.factorial(m + geodim - 1)/(math.factorial(geodim - 1)*math.factorial(m)))
         Nt = mt + 1
         N = Nx*Nt
-        P = torch.zeros(N,x.size()[0]).to(x.get_device())
-
+        P = torch.zeros(N,x.size()[0] ,device = x.get_device())
         R = 0
         for i in range(m+1):
-            P1 = st_poly(x[:,1:], m-i, mt)
+            P1 = st_poly(x[:,1:], m-i, mt, sf)
             r = P1.size()[0]
-            P[R:R+r, :] = torch.flatten(x[:,0]**i)*P1
+            P[R:R+r, :] = (sf**i)*torch.flatten(x[:,0]**i)*P1
             R += r
         return P
 
@@ -82,11 +81,12 @@ class Polynomial:
     - 'mt':                degree of Polynomial in time if 'st_separability' is True
     - 'N':                 number of polynomial basis functions
     """
-    def __init__(self, geodim, m, mt = 0, st_separability = False ):
+    def __init__(self, geodim, m, mt = 0, sf = 1, st_separability = False ):
         self.m = m
         self.mt = mt
         self.geodim = geodim
         self.st_separability = st_separability
+        self.sf = 1
         if self.st_separability:
             Nx = int(math.factorial(m + geodim - 1)/(math.factorial(geodim - 1)*math.factorial(m)))
             Nt = mt + 1
@@ -96,9 +96,9 @@ class Polynomial:
     def __call__(self, x):
         assert x.size()[1] == self.geodim
         if self.st_separability:
-            return st_poly(x, self.m, self.mt)
+            return st_poly(x, self.m, self.mt, self.sf)
         else:
-            return poly(x, self.m)
+            return poly(x, self.m, self.sf)
 
 class PolynomialTP:
     """
@@ -111,9 +111,12 @@ class PolynomialTP:
     - 'mt':                degree of Polynomial in time if 'st_separability' is True
     - 'N':                 number of polynomial basis functions
     """
-    def __init__(self, geodim, m, mt):
+    def __init__(self, geodim, m, mt = 1, st_separability = False):
         self.m = m
-        self.mt = mt
+        if st_separability:
+            self.mt = m
+        else:
+            self.mt = mt
         self.geodim = geodim
     
         Nx = (m+1)**(geodim - 1)
@@ -121,16 +124,16 @@ class PolynomialTP:
         self.N = Nx*Nt
     def __call__(self, x):
         assert x.size()[1] == self.geodim
-        P = torch.ones(1,x.size(0)).to(x.get_device())
+        P = torch.ones(1,x.size(0), device = x.get_device())
         for i in range(self.geodim - 1):
-            P1 = torch.zeros(self.m+1,x.size(0)).to(x.get_device())
+            P1 = torch.zeros(self.m+1,x.size(0), device = x.get_device())
             for j in range(self.m+1):
                 P1[j,:] = torch.flatten(x[:,i]**j)
-            P = torch.einsum('ij, mj -> ijm',P, P1).reshape((self.m+1)**(i+1), x.size(0)).to(x.get_device())
-        P1 = torch.zeros(self.mt+1, x.size(0)).to(x.get_device())
+            P = torch.einsum('ij, mj -> ijm',P, P1).reshape((self.m+1)**(i+1), x.size(0))
+        P2 = torch.zeros(self.mt+1, x.size(0), device = x.get_device())
         for j in range(self.mt+1):
-            P1[j,:] = torch.flatten(x[:,-1]**j)
-        P = torch.einsum('ij, mj -> ijm',P, P1).reshape(self.N, x.size(0)).to(x.get_device())
+            P2[j,:] = torch.flatten(x[:,-1]**j)
+        P = torch.einsum('ij, mj -> ijm',P, P2).reshape(self.N, x.size(0))
         return P
 
 def sin_basis_size(m, d):
@@ -161,7 +164,7 @@ def sinusoidal(x,m, L):
         return P
     else:
         N = sin_basis_size(m,geodim)
-        P = torch.zeros(N,x.size()[0]).to(x.get_device())
+        P = torch.zeros(N,x.size()[0],device = x.get_device())
     
         P1 = sinusoidal(x[1:0], m, L)
         r = P1.size()[0]

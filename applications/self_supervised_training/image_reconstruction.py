@@ -16,7 +16,7 @@ import scipy.io as io
 
 import argparse
 import sys
-sys.path.append( "../")
+sys.path.append( "../../")
 import os
 from nfCRT import *
 

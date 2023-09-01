@@ -55,29 +55,56 @@ class POU_Siren(torch.nn.Module):
     - 'inenr_layers': list of lienear layers applied in to sinusoidal functions
     - 'soft_max': soft max to create POU properties
     """
-    def __init__(self, Width, Final_Width, Depth = 2, geodim = 2):
+    def __init__(self, Width, Final_Width, Depth = 2, geodim = 2,split = False):
         super(POU_Siren, self).__init__()
+
+        self.split = split
         self.N_part = Final_Width
         self.soft_max = torch.nn.Softmax(dim = 1)
         self.geodim = geodim
+        self.Depth = Depth
         self.Width = Width
+
+        self.alpha = (self.Width/140)**(1/2)
+        self.omega = (self.N_part/40)**(1/2)
         
         self.input = torch.nn.Linear(geodim,Width)
         self.inner_layers = torch.nn.ModuleList([torch.nn.Linear(Width,Width) for i in range(Depth)])
-        self.soft_inp = torch.nn.Linear(Width,Final_Width)
+        if split:
+            self.static_input = torch.nn.Linear(geodim-1,Width)
+            self.static_layers = torch.nn.ModuleList([torch.nn.Linear(Width,Width) for i in range(Depth)])
+            self.soft_inp = torch.nn.Linear(2*Width,Final_Width)
+        else:
+            self.soft_inp = torch.nn.Linear(Width,Final_Width)
 
         self.init_weights()
     def init_weights(self):
         with torch.no_grad():
             self.soft_inp.bias.uniform_(0,0)
             self.input.bias.normal_(0, 1/np.sqrt(2))
-            for layer in self.inner_layers:
-                layer.bias.uniform_(0,0)
+            if self.split:
+                self.static_input.bias.normal_(0, 1/np.sqrt(2))
+                for layer, static_layer in zip(self.inner_layers,self.static_layers):
+                    layer.bias.uniform_(0,0)
+                    static_layer.bias.uniform_(0,0)
+            else:
+                for layer in self.inner_layers:
+                    layer.bias.uniform_(0,0)
+                
     def forward(self, x):
-        x = torch.sin(2*np.pi*self.input(x))
-        for layer in self.inner_layers:
-            x = torch.sin(2*np.pi*layer(x))
-        x = self.soft_inp(x)
+        if self.split:
+            y = x[:,:-1]
+            x = torch.sin(2*np.pi*self.input(self.alpha*x))
+            y = torch.sin(2*np.pi*self.static_input(self.alpha*y))
+            for layer, static_layer in zip(self.inner_layers,self.static_layers):
+                x = torch.sin(8*np.pi*layer(x)/self.Depth)
+                y = torch.sin(8*np.pi*layer(y)/self.Depth)
+            x = torch.cat((x,y),dim = 1)
+        else:
+            x = torch.sin(2*np.pi*self.input(self.alpha*x))
+            for layer in self.inner_layers:
+                x = torch.sin(8*np.pi*layer(x)/self.Depth)
+        x = self.soft_inp(self.omega*x)
         x = self.soft_max(x)
         return x
 
@@ -118,33 +145,30 @@ class POU_Tanh(torch.nn.Module):
         x = self.soft_max(x)
         return x
 
-class NeuralField:
-    def __init__(self, psi, P, dev):
-        self.psi = psi
-        self.C = torch.nn.Parameter(torch.zeros((psi.N_part, P.N), requires_grad = True, device = dev))
-        self.P = P
-    def __call__(self, x):
-        return torch.einsum( 'ij,jk,ki -> i', self.psi(x), self.C, self.P(x))
-    def copy(self):
-        old_psi = copy.deepcopy(self.psi)
-        NF2 = NeuralField(old_psi, self.P, self.C.get_device())
-        NF2.C = self.C.detach()
-        return NF2 
+          
+class FrameBasedFunction:
+    def __init__(self, frame_dict, dev):
+        self.times = np.fromiter(frame_dict.keys(), dtype = int)
+        self.s = frame_dict[self.times[0]].shape[0]
+        
+        self.arr = torch.zeros(self.s*len(self.times), device = dev)
+        for i, time in enumerate(self.times):
+            self.arr[self.s*i:(i+1)*self.s] = torch.from_numpy(frame_dict[time]).float().to(dev)
+        
+        self.dev = dev
+    def __call__(self, inds):
+        N = len(inds)
+        evalout = torch.zeros(N, device = self.dev)
+        time_coords = np.floor(inds/self.s).astype(int)
 
-class NeuralFieldSum:
-    def __init__(self, A,B, a, b):
-        self.A = A
-        self.B = B
-        self.a = a
-        self.b = b
-    def __call__(self, x):
-        if isinstance(self.B, NeuralField) or isinstance(self.B, NeuralFieldSum):
-            return self.a*self.A(x) + self.b*self.B(x)
-        else:
-            s = 200
-            nA = 180
-            coords = (s*(x[:,0]+1/2).detach().cpu().numpy()).astype(int) + \
-                     s*(s*(x[:,1]+1/2).detach().cpu().numpy()).astype(int) + \
-                     s**2*(nA*(x[:,2]+1/2).detach().cpu().numpy()).astype(int) 
-            B = torch.from_numpy(self.B[coords]).to(x.get_device())
-            return self.a*self.A(x) + self.b*B
+        int_locs = np.in1d(time_coords, self.times).nonzero()[0]
+        out_locs = np.argwhere(time_coords[int_locs] == self.times.reshape(-1,1))
+        out_locs = out_locs[out_locs[:,1].argsort()][:,0]
+
+        x_coords = inds%self.s
+
+        evalout[int_locs] = self.arr[self.s*out_locs   + x_coords[int_locs]]
+        return evalout
+
+
+        
