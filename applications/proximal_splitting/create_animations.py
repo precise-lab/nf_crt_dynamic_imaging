@@ -77,8 +77,8 @@ if __name__ == "__main__":
 
     nV = 72
     nrevs = 18
-    image = io.loadmat('induced_pressure')['p0_time'][:,:,nV*0:(nrevs + 0)*nV]
-    anat = io.loadmat('anatomy.mat')['phan_time'][:,:,nV*0:(nrevs + 0)*nV] == 9
+    image = io.loadmat('induced_pressure0.mat')['p0_time'][:,:,nV*0:(nrevs + 0)*nV]
+    anat = io.loadmat('anatomy0.mat')['phan_time'][:,:,nV*0:(nrevs + 0)*nV] == 9
     s = image.shape[0]
     nA = image.shape[2]
     
