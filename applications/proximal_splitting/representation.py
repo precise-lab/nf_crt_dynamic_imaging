@@ -79,9 +79,6 @@ if __name__ == "__main__":
     parser.add_argument('--out_folder',
                         default= 'Representation_Results/',
                         type = str)
-    parser.add_argument('--nB',
-                        default = 288,
-                        type = int)
     args = parser.parse_args()
     out_folder = args.out_folder
 
