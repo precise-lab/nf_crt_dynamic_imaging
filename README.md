@@ -4,7 +4,7 @@
 
 Companion code of journal article
 
-> L. Lozenski, M. Anastasio, U. Villa. _A Memory-Efficient Self-Supervised Dynamic Image Reconstruction Method using Neural Fields_, submitted to IEEE Transactions on Computational Imaging, 2022 ([preprint](https://arxiv.org/abs/2205.05585?context=eess))
+> L. Lozenski, M. Anastasio, U. Villa. _A Memory-Efficient Self-Supervised Dynamic Image Reconstruction Method using Neural Fields_,IEEE Transactions on Computational Imaging 8 (2022): 879-892. ([preprint](https://arxiv.org/abs/2205.05585?context=eess))
 
 
 
