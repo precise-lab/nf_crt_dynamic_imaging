@@ -225,19 +225,7 @@ def form_derivative_matrices():
     Dy = sp.csr_matrix((vy, (ry, cy)), shape = ((s-1)*s*number_of_partitions, s**2*number_of_partitions))
     Dy = Dy.astype(np.int8)
 
-def coefficient_update(dpou, C, old_pou, old_C, Grad, x, LrD, delta):
-    """Updates coefficient matrix X during proximal step
-
-    Args:
-        dpou (partition of unity): current pou
-        C (pytorch tensor): coefficient matrix to be updated
-        old_pou (partition of unity): pou from previous iteration
-        old_C (pytorch tensor): coeffiicent matrix from previous iteration
-        Grad (frame based function): Function representation gradient of imaging operator
-        x (pytorch tensor): pixel locations
-        LrD (float): global step length
-        delta (float): Regularization weight
-    """
+def coefficient_update(dpou, C, old_pou, old_C, time_int, LrD, delta):
     dev = C.get_device()
 
     global s
@@ -246,92 +234,51 @@ def coefficient_update(dpou, C, old_pou, old_C, Grad, x, LrD, delta):
     global Arow
     global Acol
 
-    global inds
-    global indsx
-    global indsy
 
     N = s**2
 
-    a = torch.zeros(N,number_of_partitions,number_of_partitions).to(dev)
-    a_xhalf = torch.zeros(s*(s-1),number_of_partitions,number_of_partitions).to(dev)
-    a_yhalf = torch.zeros(s*(s-1),number_of_partitions,number_of_partitions).to(dev)
-
+    psi = dpou(time_int.to(dev).reshape(-1,1))
+    old_psi = old_pou(time_int.to(dev).reshape(-1,1))
+    a0 = torch.sum(psi[:,:,None]*psi[:,None,:],dim = 0)
     b = torch.zeros(N,number_of_partitions).to(dev)
 
-    n_render = 12
-
+    n_render = 16
     with torch.no_grad():
-        torch.cuda.empty_cache()
-        for f in np.arange(0,nA,n_render):
-        
+        for f in range(0,nA,n_render):
             INDS = inds[f::nA]
-            INDSX = indsx[f::nA]
-            INDSY = indsy[f::nA]
-
+            
             for k in range(1,n_render):
                 INDS = np.append(INDS, inds[f+k::nA])
-                INDSX = np.append(INDSX, indsx[f+k::nA])
-                INDSY = np.append(INDSY, indsy[f+k::nA])
-
-            y = x[INDS,:].to(dev)
-            PSI = dpou(y[:,-1:])
-
-            af = torch.einsum('ik,il->ikl', PSI, PSI)
-            for k in range(n_render):  
-                a += af[k*N:(k+1)*N,:,:]
-
-            
-            target = torch.einsum('ij,ij ->i', old_pou(x[INDS,-1:].to(dev)), old_C[INDS%N,:]) - LrD*Grad(INDS)
-            outb = (PSI*target[:,None])
-
-            for k in range(n_render): 
-                b += outb[k*N:(k+1)*N,:]
-
-            y =  x[INDSX,:].to(dev)
-            PSI = dpou(y[:,-1:])
-            outa_xhalf = (LrD*delta/(s*(s-1)*nA))*torch.einsum('ik, il-> ikl',PSI,PSI)
+            target = torch.einsum('ij,ij ->i', old_psi[INDS//N,:], old_C[INDS%N,:]) - LrD*Grad(INDS)
+            psit = psi[INDS//N,:]*target[:,None]
             for k in range(n_render):
-                a_xhalf += outa_xhalf[k*s*(s-1):(k+1)*s*(s-1),:,:]
+                b += psit[k*N:(k+1)*N,:]
 
-            y = x[INDSY,:].to(dev)
-            PSI = dpou(y[:,-1:])
-            outa_yhalf = (LrD*delta/(s*(s-1)*nA))*torch.einsum('ik, il-> ikl',PSI,PSI)
-            for k in range(n_render):
-                
-                a_yhalf += outa_yhalf[k*s*(s-1):(k+1)*s*(s-1),:,:]
-    a = a.cpu().detach().numpy().flatten()
-    b = b.cpu().detach().numpy().flatten()
+        a = torch.stack([a0]*N, dim = 0).cpu().detach().numpy().flatten()/LrD
+        b = b.cpu().detach().numpy().flatten()/LrD
+        a_xhalf = (delta/(s*(s-1)*nA))*torch.stack([a0]*s*(s-1), dim = 0).cpu().detach().numpy().flatten()
 
 
-    a_xhalf = a_xhalf.cpu().detach().numpy().flatten()
-    a_yhalf = a_yhalf.cpu().detach().numpy().flatten()
+    global Dx
+    global Dy
 
-                
-
+    print("Constructing update matrices")
+    
     A = sp.csr_matrix( (a, (Arow,Acol)), shape = (number_of_partitions*N, number_of_partitions*N), dtype = np.single)
-    A_xhalf = sp.csr_matrix( (a_xhalf, (Arow[:-s*number_of_partitions**2],Acol[:-s*number_of_partitions**2])), shape = (number_of_partitions*s*(s-1), number_of_partitions*s*(s-1)), dtype =  np.single)
-    A_yhalf = sp.csr_matrix( (a_yhalf, (Arow[:-s*number_of_partitions**2],Acol[:-s*number_of_partitions**2])), shape = (number_of_partitions*s*(s-1), number_of_partitions*s*(s-1)), dtype = np.single)
+    Ax = sp.csr_matrix( (a_xhalf, (Arow[:-s*number_of_partitions**2],Acol[:-s*number_of_partitions**2])), shape = (number_of_partitions*s*(s-1), number_of_partitions*s*(s-1)), dtype = np.single)
 
-    Afull = A + Dx.T@A_xhalf@Dx + Dy.T@A_yhalf@Dy
+    def mv(v):
+        return A@v + Dx.T@(Ax@(Dx@v)) +  Dy.T@(Ax@(Dy@v))
+    L = sp.linalg.LinearOperator( (number_of_partitions*N, number_of_partitions*N), matvec = mv)
 
     
-    Cnp, exit_code   = sp.linalg.cg(Afull,b, x0 = C[:,:].flatten().cpu().detach().numpy(), tol = 1e-6, atol = 0, maxiter = 20)
-    
+    b = b.astype(np.float32)
+
+    Cnp, exit_code   = sp.linalg.cg(L, b, x0 = C[:,:].flatten().cpu().detach().numpy().astype(np.int32), tol = 1e-6, atol = 0, maxiter = 100)
     C[:,:] = torch.from_numpy(Cnp).to(dev).reshape(N,number_of_partitions)
-    
-def nf_proximal_update_tv_reg(dpou, C, old_pou, old_C, Grad, x, LrD, delta):
-    """Updates POUnet by solving the proximal problem
-
-    Args:
-        dpou (partition of unity): current pou
-        C (pytorch tensor): coefficient matrix to be updated
-        old_pou (partition of unity): pou from previous iteration
-        old_C (pytorch tensor): coeffiicent matrix from previous iteration
-        Grad (frame based function): Function representation gradient of imaging operator
-        x (pytorch tensor): pixel locations
-        LrD (float): global step length
-        delta (float): Regularization weight
-    """
+    if exit_code == 0:
+        print("     Coefficient udate sucessful")
+def nf_proximal_update_tv_reg(dpou, C, old_pou, old_C, Grad, time_int, LrD, delta):
     dev = C.get_device()
 
     global s
@@ -340,20 +287,20 @@ def nf_proximal_update_tv_reg(dpou, C, old_pou, old_C, Grad, x, LrD, delta):
     global nrevs
 
     nI = 1
-    ni = 1000
+    ni = 100
     nb = 1
 
     Np = 10**4
     N = s**2
 
     global global_it
-    Lr = 1e-5#1e-1*LrD#*(0.99)**(global_it)
+    Lr = 1e-5
 
 
     for I in np.arange(nI):
-        coefficient_update(dpou, C, old_pou, old_C, Grad, x, LrD, delta)
+        coefficient_update(dpou, C, old_pou, old_C, time_int, LrD, delta)
         
-        optimizer = torch.optim.Adam(dpou.parameters(), lr = Lr)
+        optimizer1 = torch.optim.Adam(dpou.parameters(), lr = Lr)
         global inds
         global indsx
         global indsy
@@ -362,7 +309,7 @@ def nf_proximal_update_tv_reg(dpou, C, old_pou, old_C, Grad, x, LrD, delta):
 
             for b in range(nb):
         
-                optimizer.zero_grad()
+                optimizer1.zero_grad()
                 inds0 = np.random.randint(N*nA, size = (Np,))
                 indsx0 = s*np.random.randint(s-1, size = (Np,)) + np.random.randint(s, size = (Np,)) + s**2*np.random.randint(nA, size = (Np,))
                 indsy0 = s*np.random.randint(s, size = (Np,)) + np.random.randint(s-1, size = (Np,)) + s**2*np.random.randint(nA, size = (Np,))
@@ -371,27 +318,27 @@ def nf_proximal_update_tv_reg(dpou, C, old_pou, old_C, Grad, x, LrD, delta):
                 space_indsx = indsx0%(s**2)
                 space_indsy = indsy0%(s**2)
 
-                y = x[inds0,:].to(dev)
-                #y.requires_grad = True
+                y = time_int[inds0//N].to(dev).reshape(-1,1)
+                out = torch.einsum('ij,ij->i', dpou(y), C[space_inds,:])
 
-                psi = dpou(y[:,-1:])
-                out = torch.einsum('ij,ij->i', psi, C[space_inds,:])
-
-                target =  torch.einsum('ij,ij ->i', old_pou(y[:,-1:]), old_C[space_inds,:])  - LrD*Grad(inds0)
+                target =  torch.einsum('ij,ij ->i', old_pou(y), old_C[space_inds,:])  - LrD*Grad(inds0)
                 
         
 
                 loss = torch.mean((out - target)**2)/(2)
 
                 if delta > 0:
-                    psi_xhalf = torch.einsum('ij,ij->i', dpou( (x[indsx0,-1:] ).to(dev)), C[space_indsx+s,:]  - C[space_indsx,:]  ) 
-                    psi_yhalf = torch.einsum('ij,ij->i', dpou( (x[indsy0,-1:] ).to(dev)), C[space_indsy + 1,:]  - C[space_indsy,:]  )
+                    psi_xhalf = torch.einsum('ij,ij->i', dpou( time_int[indsx0//N].to(dev).reshape(-1,1)), C[space_indsx+s,:]  - C[space_indsx,:]  ) 
+                    psi_yhalf = torch.einsum('ij,ij->i', dpou( time_int[indsy0//N].to(dev).reshape(-1,1)), C[space_indsy+1,:]  - C[space_indsy,:]  ) 
                     reg = (delta/2)*(torch.mean(psi_xhalf**2 + psi_yhalf**2))/(N*nA)
                     loss += LrD*reg
                 
                 loss.backward()
-                optimizer.step() 
+                optimizer1.step() 
 
+        
+            
+       
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Image reconstruction using proximal splitting.')
     parser.add_argument('--out_folder',
@@ -511,7 +458,7 @@ if __name__ == "__main__":
         print("Global learning rate: ", Lr_disc)
         
         #Applies proximal update
-        nf_proximal_update_tv_reg(dpou, C, old_part, old_C, Grad, x, Lr_disc, delta*M)
+        nf_proximal_update_tv_reg(dpou, C, old_part, old_C, Grad, time_int, Lr_disc, delta*M)
         
         #Save network parameters
         torch.save({'pou': dpou,

@@ -79,9 +79,6 @@ if __name__ == "__main__":
     parser.add_argument('--out_folder',
                         default= 'Representation_Results/',
                         type = str)
-    parser.add_argument('--nB',
-                        default = 288,
-                        type = int)
     args = parser.parse_args()
     out_folder = args.out_folder
 
@@ -107,20 +104,17 @@ if __name__ == "__main__":
 
 
     N = s**2
-
-    #POU will contain wsq^3 functions
     geodim = 1
     Width_dynamic = 140
     number_of_partitions = 10
     Depth = 4
     dynamic_pou = POU_Siren(Width_dynamic, number_of_partitions, Depth = Depth, geodim = geodim).to(dev)
     C = torch.zeros((N,number_of_partitions), device = dev)
+
     for j  in range(number_of_partitions):
         C[:,j] = torch.from_numpy( np.mean(image[:,:,130*j:130*(j+1)],2).flatten('F')).to(dev)
-    nf = PwNeuralField(dynamic_pou, C)
-
-    image = image.flatten('F')
-    image_torch =  torch.from_numpy(image).float().to(dev)
+    image_torch =  torch.from_numpy(image.flatten('F')).float().to(dev)
+    image_rec = torch.from_numpy(image.reshape((s**2,nA), order = 'F')).float().to(dev)
     
 
     time_int = nrevs*(torch.linspace(-1/2, 1/2,nA+1)[:-1] + 1/(2*nA))
@@ -138,15 +132,11 @@ if __name__ == "__main__":
                     'C': C,
         }, out_folder + 'dynamic_net.pt')
 
-    ni = 1#0**3
+    ni = 1
     nI = 100
-    nb = args.nB
+    nb = 16*nrevs
 
-    Lrmax = 1e-4
-    Lrmin = 1e-6
     image_norm = np.sum(image**2)**(1/2)
-
-    ntimes = nA
 
     row_inds, col_inds = torch.meshgrid(torch.arange(number_of_partitions), torch.arange(number_of_partitions))
 
@@ -164,18 +154,7 @@ if __name__ == "__main__":
 
         Lr = Lrmin + (nI - I)*(Lrmax - Lrmin)/nI 
         #Lr = Lrmax*(Lrmin/Lrmax)**(I/nI)
-        c = torch.sum(C, dim =0)
         optimizer = torch.optim.Adam(dynamic_pou.parameters(), lr = Lr)
-        """for i in range(ni):
-            optimizer.zero_grad()
-            psi = dynamic_pou(time_int.reshape(-1,1).to(dev))
-            out = torch.einsum('ij,j->i',psi,c)
-
-            loss = torch.sum((out - image_time)**2)/2
-            loss.backward()
-            optimizer.step()"""
-
-
         for i in range(ni):
             acum_loss = 0
             for b in range(nb):
@@ -196,7 +175,12 @@ if __name__ == "__main__":
                 acum_loss += loss.cpu().detach().numpy()
         print("Loss after Training Network = ", acum_loss)
         inds = ((np.arange(N)).reshape((-1,1)) + s**2*np.arange(nA).reshape(1,-1)).flatten()
-        a = torch.zeros(N,number_of_partitions,number_of_partitions).to(dev)
+
+        y = time_int.reshape(-1,1).to(dev)
+        psi = dynamic_pou(y)
+        a = torch.sum(psi[:,:,None]*psi[:,None,:],dim = 0)
+        a = torch.stack([a]*N, dim = 0)#.cpu().detach().numpy().flatten()
+        
         b = torch.zeros(N,number_of_partitions).to(dev)
         n_render = 16
 
@@ -205,25 +189,43 @@ if __name__ == "__main__":
                 INDS = inds[f::nA]
                 for k in range(1,n_render):
                     INDS = np.append(INDS, inds[f+k::nA])
-                y = x[INDS,:].to(dev)
-                PSI = dynamic_pou(y[:,-1:])
-                af = PSI[:,:,None]*PSI[:,None,:]
-
-                for k in range(n_render):
-                    a += af[k*N:(k+1)*N,:,:]
-            
                 target = image_torch[INDS].to(dev)
-                psit = PSI*target[:,None]
-                
-
+                psit = psi[INDS//N,:]*target[:,None]
                 for k in range(n_render):
                     b += psit[k*N:(k+1)*N,:]
+
+        
         a = a.cpu().detach().numpy().flatten()
         b = b.cpu().detach().numpy().flatten()
   
         A = sp.csr_matrix( (a, (Arow,Acol)), shape = (number_of_partitions*N, number_of_partitions*N))
+        #ml = pyamg.smoothed_aggregation_solver(A)
+        #M = ml.aspreconditioner()
         Cnp, exit_code   = sp.linalg.cg(A,b, x0 = C.flatten().cpu().detach().numpy(), atol = 0, tol = 1e-6, maxiter = 100)#, M = M)
         C[:,:] = torch.from_numpy(Cnp).to(dev).reshape(N,number_of_partitions)
+        
+        torch.cuda.empty_cache()
+
+        Lr = 1e-4
+        ni = 10**3
+        with torch.no_grad():
+            c = torch.mean(C[:,:,None]*C[:,None,:],dim = 0)
+            L, V = np.linalg.eig(c.cpu().detach().numpy())
+
+            A_pos = torch.from_numpy(np.diag(L**(1/2))@V.T).to(dev)
+            A_neg = torch.from_numpy(np.diag(L**(-1/2))@V.T).to(dev)
+            b = torch.mean( image_rec[:,None,:]*C[:,:,None], dim = 0)
+            
+            b = A_neg@b
+        opt = torch.optim.Adam(dynamic_pou.parameters(), lr = Lr)
+        for i in range(ni):
+            opt.zero_grad()
+            psi = dynamic_pou(time_int.to(dev).reshape(-1,1))
+            out = A_pos@psi.T
+            loss = torch.sum((out - b)**2)/2
+            loss.backward()
+            opt.step()
+
         
         with torch.no_grad():
             out_image = np.zeros(s**2*nA)
@@ -231,9 +233,9 @@ if __name__ == "__main__":
                 inds = np.arange(b,N*nA, nb)
                 space_inds = inds%(s**2)
                 y = x[inds,:].to(dev)
-                out_image[inds] = nf(y[:,-1:], space_inds).cpu().detach().numpy()
-
-        err = np.linalg.norm(out_image - image)/np.linalg.norm(image)
+                psi = dynamic_pou(y[:,-1:])
+                out_image[inds] = ( torch.einsum('ij,ij->i', psi, C[space_inds,:])).cpu().detach().numpy()
+        err = np.linalg.norm(out_image - image.flatten('F'))/np.linalg.norm(image)
         print("     RRMSE = ", err)
         torch.save({'pou': dynamic_pou,
                     'C': C,

@@ -145,30 +145,7 @@ class POU_Tanh(torch.nn.Module):
         x = self.soft_max(x)
         return x
 
-          
-class FrameBasedFunction:
-    def __init__(self, frame_dict, dev):
-        self.times = np.fromiter(frame_dict.keys(), dtype = int)
-        self.s = frame_dict[self.times[0]].shape[0]
         
-        self.arr = torch.zeros(self.s*len(self.times), device = dev)
-        for i, time in enumerate(self.times):
-            self.arr[self.s*i:(i+1)*self.s] = torch.from_numpy(frame_dict[time]).float().to(dev)
-        
-        self.dev = dev
-    def __call__(self, inds):
-        N = len(inds)
-        evalout = torch.zeros(N, device = self.dev)
-        time_coords = np.floor(inds/self.s).astype(int)
-
-        int_locs = np.in1d(time_coords, self.times).nonzero()[0]
-        out_locs = np.argwhere(time_coords[int_locs] == self.times.reshape(-1,1))
-        out_locs = out_locs[out_locs[:,1].argsort()][:,0]
-
-        x_coords = inds%self.s
-
-        evalout[int_locs] = self.arr[self.s*out_locs   + x_coords[int_locs]]
-        return evalout
 
 
         
