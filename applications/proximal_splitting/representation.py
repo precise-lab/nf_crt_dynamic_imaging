@@ -99,6 +99,8 @@ if __name__ == "__main__":
     nrevs = 18
     image = io.loadmat('induced_pressure.mat')['p0_time'][:,:,72*0:72*(nrevs+ 0)]
 
+    image_time = torch.from_numpy(np.sum(image, axis = (0,1))).to(dev)
+
     s = image.shape[0]
     nA = image.shape[2]
 
@@ -136,7 +138,7 @@ if __name__ == "__main__":
                     'C': C,
         }, out_folder + 'dynamic_net.pt')
 
-    ni = 1
+    ni = 1#0**3
     nI = 100
     nb = args.nB
 
@@ -162,7 +164,18 @@ if __name__ == "__main__":
 
         Lr = Lrmin + (nI - I)*(Lrmax - Lrmin)/nI 
         #Lr = Lrmax*(Lrmin/Lrmax)**(I/nI)
+        c = torch.sum(C, dim =0)
         optimizer = torch.optim.Adam(dynamic_pou.parameters(), lr = Lr)
+        """for i in range(ni):
+            optimizer.zero_grad()
+            psi = dynamic_pou(time_int.reshape(-1,1).to(dev))
+            out = torch.einsum('ij,j->i',psi,c)
+
+            loss = torch.sum((out - image_time)**2)/2
+            loss.backward()
+            optimizer.step()"""
+
+
         for i in range(ni):
             acum_loss = 0
             for b in range(nb):

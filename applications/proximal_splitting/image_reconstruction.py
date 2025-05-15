@@ -340,7 +340,7 @@ def nf_proximal_update_tv_reg(dpou, C, old_pou, old_C, Grad, x, LrD, delta):
     global nrevs
 
     nI = 1
-    ni = 100
+    ni = 1000
     nb = 1
 
     Np = 10**4
@@ -381,13 +381,13 @@ def nf_proximal_update_tv_reg(dpou, C, old_pou, old_C, Grad, x, LrD, delta):
                 
         
 
-                loss = torch.mean((out - target)**2)/(2*LrD)
+                loss = torch.mean((out - target)**2)/(2)
 
                 if delta > 0:
                     psi_xhalf = torch.einsum('ij,ij->i', dpou( (x[indsx0,-1:] ).to(dev)), C[space_indsx+s,:]  - C[space_indsx,:]  ) 
                     psi_yhalf = torch.einsum('ij,ij->i', dpou( (x[indsy0,-1:] ).to(dev)), C[space_indsy + 1,:]  - C[space_indsy,:]  )
                     reg = (delta/2)*(torch.mean(psi_xhalf**2 + psi_yhalf**2))/(N*nA)
-                    loss += reg
+                    loss += LrD*reg
                 
                 loss.backward()
                 optimizer.step() 
